@@ -33,7 +33,7 @@ app.use(
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "https://payroll-front-next-js.vercel.app/auth/login",
+    origin: process.env.CLIENT_URL || "https://payroll-front-next-js.vercel.app/",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
