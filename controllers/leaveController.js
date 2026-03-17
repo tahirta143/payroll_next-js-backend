@@ -414,6 +414,109 @@ const cancelLeave = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /api/leaves/admin-create
+ * Admin only — create leave request for any employee
+ */
+const adminCreateLeave = async (req, res, next) => {
+  try {
+    const { user_id, type, start_date, end_date, reason, status } = req.body;
+
+    if (!user_id || !type || !start_date || !end_date || !reason) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID, type, start date, end date and reason are required',
+      });
+    }
+
+    const validTypes = ['sick', 'casual', 'annual', 'unpaid'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ success: false, message: 'Invalid leave type' });
+    }
+
+    const validStatuses = ['pending', 'approved', 'rejected'];
+    const leaveStatus = status && validStatuses.includes(status) ? status : 'approved';
+
+    if (dayjs(start_date).isAfter(dayjs(end_date))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Start date must be before or equal to end date',
+      });
+    }
+
+    // Check if employee exists
+    const employee = await User.findByPk(user_id);
+    if (!employee || !employee.is_active) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee not found or inactive',
+      });
+    }
+
+    const days_count = getWorkingDays(start_date, end_date);
+
+    // Check for overlapping pending/approved requests
+    const overlap = await LeaveRequest.findOne({
+      where: {
+        user_id,
+        status: { [Op.in]: ['pending', 'approved'] },
+        [Op.or]: [
+          { start_date: { [Op.between]: [start_date, end_date] } },
+          { end_date: { [Op.between]: [start_date, end_date] } },
+          {
+            start_date: { [Op.lte]: start_date },
+            end_date: { [Op.gte]: end_date },
+          },
+        ],
+      },
+    });
+
+    if (overlap) {
+      return res.status(409).json({
+        success: false,
+        message: 'Employee already has a leave request overlapping these dates',
+      });
+    }
+
+    const leave = await LeaveRequest.create({
+      user_id,
+      type,
+      start_date,
+      end_date,
+      days_count,
+      reason,
+      status: leaveStatus,
+      reviewed_by: leaveStatus !== 'pending' ? req.user.id : null,
+      review_note: leaveStatus !== 'pending' ? `Created by admin: ${req.user.name}` : null,
+    });
+
+    // Create notification for the employee
+    await Notification.create({
+      user_id,
+      message: `A ${type} leave request has been created for you (${start_date} to ${end_date}) - Status: ${leaveStatus}`,
+      type: 'leave_created',
+    });
+
+    // Fetch the created leave with user info
+    const createdLeave = await LeaveRequest.findByPk(leave.id, {
+      include: [
+        {
+          association: 'user',
+          attributes: ['id', 'name', 'email'],
+        },
+      ],
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Leave request created successfully',
+      data: createdLeave,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   submitLeave,
   getMyLeaves,
@@ -423,4 +526,5 @@ module.exports = {
   rejectLeave,
   getLeaveBalance,
   cancelLeave,
+  adminCreateLeave,
 };

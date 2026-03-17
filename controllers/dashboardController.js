@@ -3,71 +3,127 @@ const { Op, fn, col, literal } = require('sequelize');
 const dayjs = require('dayjs');
 
 /**
+ * Calculate how many days of each leave type a user has used this year
+ */
+const getLeaveUsage = async (userId) => {
+  const year = dayjs().year();
+  const start = `${year}-01-01`;
+  const end = `${year}-12-31`;
+
+  const approved = await LeaveRequest.findAll({
+    where: {
+      user_id: userId,
+      status: 'approved',
+      start_date: { [Op.between]: [start, end] },
+    },
+  });
+
+  const usage = { sick: 0, casual: 0, annual: 0, unpaid: 0 };
+  for (const req of approved) {
+    usage[req.type] = (usage[req.type] || 0) + (req.days_count || 0);
+  }
+  return usage;
+};
+
+/**
  * GET /api/dashboard/stats
  * Returns KPI summary: total employees, present today, absent, on leave, late arrivals
+ * Admin sees all data, employees see only their own data
  */
 const getStats = async (req, res, next) => {
   try {
     const today = dayjs().format('YYYY-MM-DD');
+    const isAdmin = req.user.role === 'admin';
 
-    // Total active employees (non-admin)
-    const totalEmployees = await User.count({
-      where: { is_active: true, role: { [Op.in]: ['employee', 'manager'] } },
-    });
-
-    // Today's attendance records
-    const todayRecords = await Attendance.findAll({
-      where: { date: today },
-      attributes: ['user_id', 'status'],
-    });
-
-    const presentCount = todayRecords.filter((r) => r.status === 'present').length;
-    const lateCount = todayRecords.filter((r) => r.status === 'late').length;
-    const halfDayCount = todayRecords.filter((r) => r.status === 'half_day').length;
-    const onLeaveCount = todayRecords.filter((r) => r.status === 'leave').length;
-
-    // Absent = employees who have no record today and no approved leave
-    const checkedInIds = todayRecords.map((r) => r.user_id);
-
-    const approvedLeaveToday = await LeaveRequest.findAll({
-      where: {
-        status: 'approved',
-        start_date: { [Op.lte]: today },
-        end_date: { [Op.gte]: today },
-      },
-      attributes: ['user_id'],
-    });
-    const onLeaveIds = approvedLeaveToday.map((l) => l.user_id);
-
-    const accountedIds = [...new Set([...checkedInIds, ...onLeaveIds])];
-
-    const absentCount =
-      totalEmployees - accountedIds.filter((id) => id).length > 0
-        ? totalEmployees - accountedIds.filter((id) => id).length
-        : 0;
-
-    // Pending leave requests
-    const pendingLeaves = await LeaveRequest.count({ where: { status: 'pending' } });
-
-    // Unread notifications for current user
+    // Unread notifications for current user (both admin and employee)
     const unreadNotifications = await Notification.count({
       where: { user_id: req.user.id, is_read: false },
     });
 
-    res.json({
-      success: true,
-      data: {
-        totalEmployees,
-        presentToday: presentCount,
-        lateToday: lateCount,
-        halfDayToday: halfDayCount,
-        onLeaveToday: onLeaveToday(todayRecords, onLeaveIds),
-        absentToday: absentCount,
-        pendingLeaves,
-        unreadNotifications,
-        date: today,
-      },
-    });
+    if (isAdmin) {
+      // Admin sees all employee statistics
+      const totalEmployees = await User.count({
+        where: { is_active: true, role: { [Op.in]: ['employee', 'manager'] } },
+      });
+
+      const todayRecords = await Attendance.findAll({
+        where: { date: today },
+        attributes: ['user_id', 'status'],
+      });
+
+      const presentCount = todayRecords.filter((r) => r.status === 'present').length;
+      const lateCount = todayRecords.filter((r) => r.status === 'late').length;
+      const halfDayCount = todayRecords.filter((r) => r.status === 'half_day').length;
+      const onLeaveCount = todayRecords.filter((r) => r.status === 'leave').length;
+
+      const checkedInIds = todayRecords.map((r) => r.user_id);
+
+      const approvedLeaveToday = await LeaveRequest.findAll({
+        where: {
+          status: 'approved',
+          start_date: { [Op.lte]: today },
+          end_date: { [Op.gte]: today },
+        },
+        attributes: ['user_id'],
+      });
+      const onLeaveIds = approvedLeaveToday.map((l) => l.user_id);
+
+      const accountedIds = [...new Set([...checkedInIds, ...onLeaveIds])];
+      const absentCount =
+        totalEmployees - accountedIds.filter((id) => id).length > 0
+          ? totalEmployees - accountedIds.filter((id) => id).length
+          : 0;
+
+      const pendingLeaves = await LeaveRequest.count({ where: { status: 'pending' } });
+
+      res.json({
+        success: true,
+        data: {
+          totalEmployees,
+          presentToday: presentCount,
+          lateToday: lateCount,
+          halfDayToday: halfDayCount,
+          onLeaveToday: onLeaveToday(todayRecords, onLeaveIds),
+          absentToday: absentCount,
+          pendingLeaves,
+          unreadNotifications,
+          date: today,
+          userRole: 'admin',
+        },
+      });
+    } else {
+      // Employee sees only their own data
+      const userAttendance = await Attendance.findOne({
+        where: { user_id: req.user.id, date: today },
+      });
+
+      const userLeaveBalance = await getLeaveUsage(req.user.id);
+      const pendingLeaves = await LeaveRequest.count({
+        where: { user_id: req.user.id, status: 'pending' },
+      });
+
+      const approvedLeaveToday = await LeaveRequest.findOne({
+        where: {
+          user_id: req.user.id,
+          status: 'approved',
+          start_date: { [Op.lte]: today },
+          end_date: { [Op.gte]: today },
+        },
+      });
+
+      res.json({
+        success: true,
+        data: {
+          todayAttendance: userAttendance,
+          onLeaveToday: !!approvedLeaveToday,
+          leaveBalance: userLeaveBalance,
+          pendingLeaves,
+          unreadNotifications,
+          date: today,
+          userRole: req.user.role,
+        },
+      });
+    }
   } catch (err) {
     next(err);
   }
@@ -82,11 +138,16 @@ function onLeaveToday(todayRecords, onLeaveIds) {
 /**
  * GET /api/dashboard/recent-activity
  * Returns the latest check-ins and leave requests
+ * Admin sees all activity, employees see only their own
  */
 const getRecentActivity = async (req, res, next) => {
   try {
+    const isAdmin = req.user.role === 'admin';
+    const whereClause = isAdmin ? {} : { user_id: req.user.id };
+
     // Recent check-ins (last 10)
     const recentCheckIns = await Attendance.findAll({
+      where: whereClause,
       limit: 10,
       order: [['created_at', 'DESC']],
       include: [
@@ -100,6 +161,7 @@ const getRecentActivity = async (req, res, next) => {
 
     // Recent leave requests (last 10)
     const recentLeaves = await LeaveRequest.findAll({
+      where: whereClause,
       limit: 10,
       order: [['created_at', 'DESC']],
       include: [
@@ -117,7 +179,9 @@ const getRecentActivity = async (req, res, next) => {
         id: `att_${r.id}`,
         type: 'check_in',
         user: r.user,
-        message: `${r.user ? r.user.name : 'Unknown'} checked in`,
+        message: isAdmin 
+          ? `${r.user ? r.user.name : 'Unknown'} checked in`
+          : 'You checked in',
         status: r.status,
         time: r.created_at,
         meta: {
@@ -130,7 +194,9 @@ const getRecentActivity = async (req, res, next) => {
         id: `leave_${l.id}`,
         type: 'leave_request',
         user: l.user,
-        message: `${l.user ? l.user.name : 'Unknown'} requested ${l.type} leave`,
+        message: isAdmin
+          ? `${l.user ? l.user.name : 'Unknown'} requested ${l.type} leave`
+          : `You requested ${l.type} leave`,
         status: l.status,
         time: l.created_at,
         meta: {

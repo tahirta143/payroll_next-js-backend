@@ -9,6 +9,7 @@ const {
   rejectLeave,
   getLeaveBalance,
   cancelLeave,
+  adminCreateLeave,
 } = require('../controllers/leaveController');
 const authMiddleware = require('../middleware/authMiddleware');
 const roleGuard = require('../middleware/roleGuard');
@@ -18,6 +19,9 @@ router.use(authMiddleware);
 
 // POST /api/leaves — Employee submits a leave request
 router.post('/', submitLeave);
+
+// POST /api/leaves/admin-create — Admin creates leave for any employee
+router.post('/admin-create', roleGuard('admin'), adminCreateLeave);
 
 // GET /api/leaves/my — Employee views their own requests
 router.get('/my', getMyLeaves);

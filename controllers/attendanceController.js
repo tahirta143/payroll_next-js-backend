@@ -276,6 +276,78 @@ const markAbsent = async (req, res, next) => {
   }
 };
 
+/**
+ * POST /api/attendance/mark-employee
+ * Admin only — manually mark attendance for any employee
+ */
+const markEmployeeAttendance = async (req, res, next) => {
+  try {
+    const { user_id, date, status, check_in_time, check_out_time, note } = req.body;
+
+    if (!user_id || !date || !status) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID, date, and status are required',
+      });
+    }
+
+    // Check if employee exists
+    const employee = await User.findByPk(user_id);
+    if (!employee || !employee.is_active) {
+      return res.status(404).json({
+        success: false,
+        message: 'Employee not found or inactive',
+      });
+    }
+
+    // Check if attendance already exists for this date
+    const existing = await Attendance.findOne({
+      where: { user_id, date },
+    });
+
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: 'Attendance record already exists for this date',
+      });
+    }
+
+    // Calculate work hours if both times provided
+    let work_hours = null;
+    if (check_in_time && check_out_time) {
+      work_hours = calcWorkHours(check_in_time, check_out_time);
+    }
+
+    const attendance = await Attendance.create({
+      user_id,
+      date,
+      status,
+      check_in_time: check_in_time || null,
+      check_out_time: check_out_time || null,
+      work_hours,
+      note: note || `Marked by admin: ${req.user.name}`,
+    });
+
+    // Fetch the created record with user info
+    const createdRecord = await Attendance.findByPk(attendance.id, {
+      include: [
+        {
+          association: 'user',
+          attributes: ['id', 'name', 'email'],
+        },
+      ],
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Employee attendance marked successfully',
+      data: createdRecord,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   checkIn,
   checkOut,
@@ -284,4 +356,5 @@ module.exports = {
   getAllAttendance,
   updateAttendance,
   markAbsent,
+  markEmployeeAttendance,
 };

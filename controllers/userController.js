@@ -12,7 +12,10 @@ const getUsers = async (req, res, next) => {
     const { page, limit, offset } = paginate(req.query);
     const { search, department, role } = req.query;
 
-    const where = { is_active: true };
+    const where = { 
+      is_active: true,
+      password_hash: { [Op.not]: null } // Only show users with passwords (actual user accounts)
+    };
 
     if (search) {
       where[Op.or] = [

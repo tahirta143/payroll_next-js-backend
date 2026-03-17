@@ -16,6 +16,23 @@ const Attendance = sequelize.define('Attendance', {
   latitude: { type: DataTypes.DECIMAL(10, 8), allowNull: true },
   longitude: { type: DataTypes.DECIMAL(11, 8), allowNull: true },
   work_hours: { type: DataTypes.DECIMAL(4, 2), allowNull: true },
-}, { tableName: 'attendance' });
+}, { 
+  tableName: 'attendance',
+  indexes: [
+    {
+      unique: true,
+      fields: ['user_id', 'date']
+    },
+    {
+      fields: ['user_id']
+    },
+    {
+      fields: ['date']
+    },
+    {
+      fields: ['status']
+    }
+  ]
+});
 
 module.exports = Attendance;

@@ -1,108 +1,8 @@
 require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const helmet = require("helmet");
-const morgan = require("morgan");
-const path = require("path");
-
+const app = require('./app');
 const { sequelize } = require("./models");
-const errorHandler = require("./middleware/errorHandler");
 
-// Route imports
-const authRoutes = require("./routes/auth");
-const userRoutes = require("./routes/users");
-const attendanceRoutes = require("./routes/attendance");
-const leaveRoutes = require("./routes/leaves");
-const reportRoutes = require("./routes/reports");
-const dashboardRoutes = require("./routes/dashboard");
-const departmentRoutes = require("./routes/departments");
-const shiftRoutes = require("./routes/shifts");
-
-const app = express();
 const PORT = process.env.PORT || 5000;
-
-// ─────────────────────────────────────────────
-//  Security & Core Middleware
-// ─────────────────────────────────────────────
-
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" },
-  }),
-);
-
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || "https://payroll-front-next-js.vercel.app/",
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  }),
-);
-
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-
-if (process.env.NODE_ENV === "development") {
-  app.use(morgan("dev"));
-} else {
-  app.use(morgan("combined"));
-}
-
-// ─────────────────────────────────────────────
-//  Static Files (uploaded avatars)
-// ─────────────────────────────────────────────
-
-app.use(
-  "/uploads",
-  express.static(path.join(__dirname, "uploads"), {
-    maxAge: "1d",
-    etag: false,
-  }),
-);
-
-// ─────────────────────────────────────────────
-//  Health Check
-// ─────────────────────────────────────────────
-
-app.get("/health", (req, res) => {
-  res.json({
-    success: true,
-    message: "Attendance Management System API is running",
-    environment: process.env.NODE_ENV,
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// ─────────────────────────────────────────────
-//  API Routes
-// ─────────────────────────────────────────────
-
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/attendance", attendanceRoutes);
-app.use("/api/leaves", leaveRoutes);
-app.use("/api/reports", reportRoutes);
-app.use("/api/dashboard", dashboardRoutes);
-app.use("/api/departments", departmentRoutes);
-app.use("/api", shiftRoutes); // mounts /api/shifts/* and /api/holidays/*
-
-// ─────────────────────────────────────────────
-//  404 Handler
-// ─────────────────────────────────────────────
-
-app.use("*", (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: `Route ${req.method} ${req.originalUrl} not found`,
-  });
-});
-
-// ─────────────────────────────────────────────
-//  Global Error Handler
-// ─────────────────────────────────────────────
-
-app.use(errorHandler);
 
 // ─────────────────────────────────────────────
 //  Database Sync & Server Start
@@ -114,10 +14,26 @@ const startServer = async () => {
     await sequelize.authenticate();
     console.log("✅  Database connection established successfully.");
 
-    // Sync models — alter:true updates schema without dropping data
-    // Use force:true ONLY in development when you want a clean slate
-    await sequelize.sync({ alter: process.env.NODE_ENV === "development" });
-    console.log("✅  Database models synchronized.");
+    // Check if we need to reset the database due to too many keys
+    try {
+      // Try a simple sync first
+      await sequelize.sync({ alter: false });
+      console.log("✅  Database models synchronized.");
+    } catch (syncError) {
+      if (syncError.message.includes('Too many keys specified') || syncError.message.includes('max 64 keys')) {
+        console.log("⚠️   Too many keys detected. Resetting database...");
+        
+        // Drop all tables and recreate them
+        await sequelize.drop();
+        console.log("🗑️   Dropped existing tables.");
+        
+        // Create fresh tables
+        await sequelize.sync({ force: false });
+        console.log("✅  Database recreated successfully.");
+      } else {
+        throw syncError;
+      }
+    }
 
     // Seed a default admin if none exists
     await seedAdmin();
