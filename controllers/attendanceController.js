@@ -113,13 +113,13 @@ const getTodayAttendance = async (req, res, next) => {
 };
 
 /**
- * GET /api/attendance/user/:id?startDate=&endDate=
- * Get attendance records for a specific user within a date range
+ * GET /api/attendance/user/:id?startDate=&endDate=&date=
+ * Get attendance records for a specific user within a date range or single date
  */
 const getUserAttendance = async (req, res, next) => {
   try {
     const { page, limit, offset } = paginate(req.query);
-    const { startDate, endDate, status } = req.query;
+    const { startDate, endDate, status, date } = req.query;
     const userId = req.params.id;
 
     // Employees can only view their own records
@@ -129,7 +129,10 @@ const getUserAttendance = async (req, res, next) => {
 
     const where = { user_id: userId };
 
-    if (startDate && endDate) {
+    // Handle both single date and date range for backward compatibility
+    if (date) {
+      where.date = date;
+    } else if (startDate && endDate) {
       where.date = { [Op.between]: [startDate, endDate] };
     } else if (startDate) {
       where.date = { [Op.gte]: startDate };
@@ -160,10 +163,21 @@ const getUserAttendance = async (req, res, next) => {
 const getAllAttendance = async (req, res, next) => {
   try {
     const { page, limit, offset } = paginate(req.query);
-    const { date, department, status, search } = req.query;
+    const { date, department, status, search, startDate, endDate } = req.query;
 
     const where = {};
-    if (date) where.date = date;
+    
+    // Handle both single date and date range for backward compatibility
+    if (date) {
+      where.date = date;
+    } else if (startDate && endDate) {
+      where.date = { [Op.between]: [startDate, endDate] };
+    } else if (startDate) {
+      where.date = { [Op.gte]: startDate };
+    } else if (endDate) {
+      where.date = { [Op.lte]: endDate };
+    }
+    
     if (status) where.status = status;
 
     const userWhere = { is_active: true };
