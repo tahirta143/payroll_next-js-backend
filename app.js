@@ -17,6 +17,8 @@ const reportRoutes = require("./routes/reports");
 const dashboardRoutes = require("./routes/dashboard");
 const departmentRoutes = require("./routes/departments");
 const shiftRoutes = require("./routes/shifts");
+const aiRoutes = require("./routes/ai");
+const debugRoutes = require("./routes/debug");
 
 const app = express();
 
@@ -86,6 +88,8 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api", shiftRoutes); // mounts /api/shifts/* and /api/holidays/*
+app.use("/api/ai", aiRoutes);
+app.use("/api/debug", debugRoutes);
 
 // ─────────────────────────────────────────────
 //  404 Handler

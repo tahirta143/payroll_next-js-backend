@@ -16,11 +16,11 @@ const startServer = async () => {
 
     // Check if we need to reset the database due to too many keys
     try {
-      // Try a simple sync first
+      // Try a simple sync first - this will create tables if they don't exist
       await sequelize.sync({ alter: false });
       console.log("✅  Database models synchronized.");
     } catch (syncError) {
-      if (syncError.message.includes('Too many keys specified') || syncError.message.includes('max 64 keys')) {
+      if (syncError.message.includes('Too many keys') || syncError.message.includes('max 64 keys')) {
         console.log("⚠️   Too many keys detected. Resetting database...");
         
         // Drop all tables and recreate them
